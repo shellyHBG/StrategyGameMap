@@ -12,7 +12,7 @@ public class Role : MonoBehaviour
     #region MonoBehaviour
     private void OnMouseDown()
     {
-        toggleWalkableTiles();
+        toggleMovableTiles();
     }
     #endregion
 
@@ -22,9 +22,9 @@ public class Role : MonoBehaviour
         StartCoroutine(moveToSimple(trTarget));
     }
 
-    private void toggleWalkableTiles()
+    private void toggleMovableTiles()
     {
-        GameMapManager.Instance.ToggleWalkableTiles(this, transform, _moveRange);
+        GameMapManager.Instance.ToggleMovableTiles(this, transform, _moveRange);
     }
 
     /// <summary>

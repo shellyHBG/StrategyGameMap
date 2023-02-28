@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -15,8 +16,10 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     /// Selected role to do something
     /// </summary>
     private Role _selectedRole;
+    private int _selectedRoleRange;
+    private bool _bMoving;
     /// <summary>
-    /// Walkable tiles of selected role
+    /// Movable tiles of selected role
     /// </summary>
     private HashSet<Tile_1> _setHighlightedTiles;
 
@@ -52,19 +55,21 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     }
 
     /// <summary>
-    /// Show/Hide higlight tiles where is walkable for a role
+    /// Show/Hide higlight tiles where is movable for a role
     /// </summary>
-    public void ToggleWalkableTiles(Role selectedRole, Transform trToTarget, int range)
+    public void ToggleMovableTiles(Role selectedRole, Transform trToTarget, int range)
     {
         if (_setHighlightedTiles == null || _setHighlightedTiles.Count == 0)
         {
             _selectedRole = selectedRole;
-            showWalkableTiles(trToTarget, range);
+            _selectedRoleRange = range;
+            showMovableTiles(trToTarget, range);
         }
         else
         {
             _selectedRole = null;
-            hideWalkableTiles();
+            _selectedRoleRange = 0;
+            hideMovableTiles();
         }
     }
 
@@ -73,18 +78,26 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     /// </summary>
     public void MoveToHere(Vector2 v2Target)
     {
-        if (_selectedRole == null)
+        if (_selectedRole == null || _bMoving)
             return;
 
         if (!_dictVec2Tiles.TryGetValue(v2Target, out Tile_1 tileTarget) || tileTarget == null)
             return;
 
-        // TODO: calculate the path
+        _bMoving = true;
 
-        _selectedRole.Move(tileTarget.transform, onMoveToEnd);
+        // calculate the path
+        Vector2 v2Source = new Vector2(_selectedRole.transform.position.x, _selectedRole.transform.position.y);
+        if (!calculatePathTo(v2Source, v2Target, _selectedRoleRange, out Stack<Vector2> inversedPath))
+        {
+            throw new Exception($"Path from {v2Source} to {v2Target} cannot be calculated.");
+        }
+
+        // move selected role to the destination
+        StartCoroutine(moveToByStep(inversedPath));
     }
 
-    private void showWalkableTiles(Transform trTaget, int range)
+    private void showMovableTiles(Transform trTaget, int range)
     {
         Vector2 v2Target = new Vector2(trTaget.position.x, trTaget.position.y);
         if (!_dictVec2Tiles.TryGetValue(v2Target, out Tile_1 tileTarget) || tileTarget == null)
@@ -106,20 +119,21 @@ public class GameMapManager : MonoSingleton<GameMapManager>
         //    }
         //}
 
-        // Method 2: search with depth = range        
-        Vector2[] adjPos = searchAdjacentPosition(tileTarget, range);
-        for (int i = 0; i < adjPos.Length; i++)
+        // Method 2: search with depth = range
+        Dictionary<Vector2, int> adjPos = calculateMovablePosition(tileTarget, range, 0);
+        foreach (var pos in adjPos)
         {
-            if (!_dictVec2Tiles.TryGetValue(adjPos[i], out Tile_1 highlightTile) || highlightTile == null)
+            if (!_dictVec2Tiles.TryGetValue(pos.Key, out Tile_1 highlightTile) || highlightTile == null)
                 continue;
-            if (highlightTile.HighlightTile())
-            {
-                _setHighlightedTiles.Add(highlightTile);
-            }
+            if (pos.Key == v2Target)
+                highlightTile.HighlightTile(0);
+            else
+                highlightTile.HighlightTile(pos.Value);
+            _setHighlightedTiles.Add(highlightTile);
         }
     }
 
-    private void hideWalkableTiles()
+    private void hideMovableTiles()
     {
         foreach (Tile_1 tile in _setHighlightedTiles)
         {
@@ -131,33 +145,97 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     private void onMoveToEnd()
     {
         _selectedRole = null;
-        hideWalkableTiles();
+        _selectedRoleRange = 0;
+        _bMoving = false;
+        hideMovableTiles();
     }
 
     /// <summary>
-    /// Search all position of tiles in range
+    /// Search all movable position of tiles and their cost in range
     /// Recursively function call
     /// </summary>
-    private Vector2[] searchAdjacentPosition(Tile_1 tile, int depth)
+    private Dictionary<Vector2, int> calculateMovablePosition(Tile_1 tile, int depth, int cost)
     {
         if (depth <= 0)
             return null;
 
-        List<Vector2> listAllPos = new List<Vector2>();
+        cost++;
+        Dictionary<Vector2, int> listAllPos = new Dictionary<Vector2, int>();
+
         Vector2[] adjacentPos = tile.GetAdjacentPosition();
         for (int i = 0; i < adjacentPos.Length; i++)
         {
             // check position in map
             if (_dictVec2Tiles.TryGetValue(adjacentPos[i], out Tile_1 adTile) && adTile != null)
             {
-                listAllPos.Add(adjacentPos[i]);
+                if (!adTile.Movable)
+                    continue;
+                if (!listAllPos.TryAdd(adjacentPos[i], cost) && cost < listAllPos[adjacentPos[i]])
+                    listAllPos[adjacentPos[i]] = cost;
                 // call recursively to get next depth position
-                Vector2[] nextAdjPos = searchAdjacentPosition(adTile, depth - 1);
+                Dictionary<Vector2, int> nextAdjPos = calculateMovablePosition(adTile, depth - 1, cost);
                 if (nextAdjPos != null)
-                    listAllPos.AddRange(nextAdjPos);
+                {
+                    foreach (var newPos in nextAdjPos)
+                    {
+                        // override cost if duplicated position cost less
+                        if (!listAllPos.TryAdd(newPos.Key, newPos.Value) && newPos.Value < listAllPos[newPos.Key])
+                            listAllPos[newPos.Key] = newPos.Value;
+                    }
+                }
             }
         }
 
-        return listAllPos.ToArray();
+        return listAllPos;
+    }
+
+    /// <summary>
+    /// Calculate the inversed path from source to distination.
+    /// Then call method `moveToByStep` to move selected role.
+    /// </summary>
+    private bool calculatePathTo(Vector2 source, Vector2 destination, int maxStep, out Stack<Vector2> inversedPath)
+    {
+        inversedPath = new Stack<Vector2>();
+        Vector2 curPos = destination;
+        inversedPath.Push(curPos);
+        int curStep = 0;
+        while(source != curPos && ++curStep <= maxStep)
+        {
+            _dictVec2Tiles.TryGetValue(curPos, out Tile_1 curTile);
+            if (curTile == null)
+                break;
+
+            Vector2[] adjPos = curTile.GetAdjacentPosition();
+            Tile_1 nextTile = null;
+            for (int i = 0; i < adjPos.Length; i++)
+            {
+                _dictVec2Tiles.TryGetValue(adjPos[i], out Tile_1 adjTile);
+                if (adjTile == null)
+                    continue;
+                if (nextTile == null || adjTile.Cost < nextTile.Cost)
+                    nextTile = adjTile;
+            }
+
+            curPos = nextTile.MapPosition;
+            if (source != curPos)
+                inversedPath.Push(curPos);
+        }
+        return source == curPos;
+    }
+
+    /// <summary>
+    /// Move by step
+    /// </summary>
+    private IEnumerator moveToByStep(Stack<Vector2> inversedPath)
+    {
+        while(inversedPath.Count > 0)
+        {
+            Vector2 nextPos = inversedPath.Pop();
+            _dictVec2Tiles.TryGetValue(nextPos, out Tile_1 nextTile);
+            bool stepFinished = false;
+            _selectedRole.Move(nextTile.transform, () => { stepFinished = true; });
+            yield return new WaitUntil(()=>stepFinished);
+        }
+        onMoveToEnd();
     }
 }
