@@ -2,29 +2,34 @@ using System;
 using System.Collections;
 using UnityEngine;
 
-public class Role : MonoBehaviour
+public class Role : MonoBehaviour, IMovable
 {
     [SerializeField] [Range(1, 7)] private int _moveRange = 3;
     [SerializeField] [Range(1, 3)] private float _moveSpeed = 2;
 
     private Action _onMoveEnd;
 
-    #region MonoBehaviour
-    private void OnMouseDown()
-    {
-        toggleMovableTiles();
-    }
-    #endregion
+    #region implement IMovable
+    public Vector2 MapPosition => transform.position;
+    public int MoveRange => _moveRange;
 
     public void Move(Transform trTarget, Action onMoveEnd)
     {
         _onMoveEnd = onMoveEnd;
         StartCoroutine(moveToSimple(trTarget));
     }
+    #endregion
 
-    private void toggleMovableTiles()
+    #region MonoBehaviour
+    private void OnMouseDown()
     {
-        GameMapManager.Instance.ToggleMovableTiles(this, transform, _moveRange);
+        ToggleMovableTiles();
+    }
+    #endregion
+
+    private void ToggleMovableTiles()
+    {
+        GameMapManager.Instance.ToggleMovableTiles(this, MapPosition, _moveRange);
     }
 
     /// <summary>

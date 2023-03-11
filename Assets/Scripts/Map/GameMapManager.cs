@@ -13,10 +13,9 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     private Dictionary<Vector2, Tile_1> _dictVec2Tiles;
 
     /// <summary>
-    /// Selected role to do something
+    /// Selected role to do something (An object implements IMovable)
     /// </summary>
-    private Role _selectedRole;
-    private int _selectedRoleRange;
+    private IMovable _selectedRole;
     private bool _bMoving;
     /// <summary>
     /// Movable tiles of selected role
@@ -57,19 +56,17 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     /// <summary>
     /// Show/Hide higlight tiles where is movable for a role
     /// </summary>
-    public void ToggleMovableTiles(Role selectedRole, Transform trToTarget, int range)
+    public void ToggleMovableTiles(IMovable movableRole, Vector2 v2ToTarget, int range)
     {
         if (_setHighlightedTiles == null || _setHighlightedTiles.Count == 0)
         {
-            _selectedRole = selectedRole;
-            _selectedRoleRange = range;
-            showMovableTiles(trToTarget, range);
+            _selectedRole = movableRole;
+            ShowMovableTiles(v2ToTarget, range);
         }
         else
         {
             _selectedRole = null;
-            _selectedRoleRange = 0;
-            hideMovableTiles();
+            HideMovableTiles();
         }
     }
 
@@ -87,19 +84,20 @@ public class GameMapManager : MonoSingleton<GameMapManager>
         _bMoving = true;
 
         // calculate the path
-        Vector2 v2Source = new Vector2(_selectedRole.transform.position.x, _selectedRole.transform.position.y);
-        if (!calculatePathTo(v2Source, v2Target, _selectedRoleRange, out Stack<Vector2> inversedPath))
+        Vector2 v2Source = _selectedRole.MapPosition;
+        if (!CalculatePathTo(v2Source, v2Target, _selectedRole.MoveRange, out Stack<Vector2> inversedPath))
         {
+            OnMoveToEnd();
             throw new Exception($"Path from {v2Source} to {v2Target} cannot be calculated.");
         }
 
         // move selected role to the destination
-        StartCoroutine(moveToByStep(inversedPath));
+        StartCoroutine(MoveToByStep(inversedPath));
     }
 
-    private void showMovableTiles(Transform trTaget, int range)
+    private void ShowMovableTiles(Vector2 v2Target, int range)
     {
-        Vector2 v2Target = new Vector2(trTaget.position.x, trTaget.position.y);
+        //Vector2 v2Target = new Vector2(trTaget.position.x, trTaget.position.y);
         if (!_dictVec2Tiles.TryGetValue(v2Target, out Tile_1 tileTarget) || tileTarget == null)
         {
             throw new NullReferenceException($"Tile position [{v2Target}] not in Map.");
@@ -120,12 +118,12 @@ public class GameMapManager : MonoSingleton<GameMapManager>
         //}
 
         // Method 2: search with depth = range
-        Dictionary<Vector2, int> adjPos = calculateMovablePosition(tileTarget, range, 0);
+        Dictionary<Vector2, int> adjPos = CalculateMovablePosition(tileTarget, range, 0);
         foreach (var pos in adjPos)
         {
             if (!_dictVec2Tiles.TryGetValue(pos.Key, out Tile_1 highlightTile) || highlightTile == null)
                 continue;
-            if (pos.Key == v2Target)
+            if (pos.Key == v2Target)    // the cost of start position is zero
                 highlightTile.HighlightTile(0);
             else
                 highlightTile.HighlightTile(pos.Value);
@@ -133,7 +131,7 @@ public class GameMapManager : MonoSingleton<GameMapManager>
         }
     }
 
-    private void hideMovableTiles()
+    private void HideMovableTiles()
     {
         foreach (Tile_1 tile in _setHighlightedTiles)
         {
@@ -142,19 +140,18 @@ public class GameMapManager : MonoSingleton<GameMapManager>
         _setHighlightedTiles.Clear();
     }
 
-    private void onMoveToEnd()
+    private void OnMoveToEnd()
     {
         _selectedRole = null;
-        _selectedRoleRange = 0;
         _bMoving = false;
-        hideMovableTiles();
+        HideMovableTiles();
     }
 
     /// <summary>
-    /// Search all movable position of tiles and their cost in range
-    /// Recursively function call
+    /// Search all movable position of tiles and their cost in range.
+    /// Recursively function call.
     /// </summary>
-    private Dictionary<Vector2, int> calculateMovablePosition(Tile_1 tile, int depth, int cost)
+    private Dictionary<Vector2, int> CalculateMovablePosition(Tile_1 tile, int depth, int cost)
     {
         if (depth <= 0)
             return null;
@@ -173,7 +170,7 @@ public class GameMapManager : MonoSingleton<GameMapManager>
                 if (!listAllPos.TryAdd(adjacentPos[i], cost) && cost < listAllPos[adjacentPos[i]])
                     listAllPos[adjacentPos[i]] = cost;
                 // call recursively to get next depth position
-                Dictionary<Vector2, int> nextAdjPos = calculateMovablePosition(adTile, depth - 1, cost);
+                Dictionary<Vector2, int> nextAdjPos = CalculateMovablePosition(adTile, depth - 1, cost);
                 if (nextAdjPos != null)
                 {
                     foreach (var newPos in nextAdjPos)
@@ -190,10 +187,10 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     }
 
     /// <summary>
-    /// Calculate the inversed path from source to distination.
-    /// Then call method `moveToByStep` to move selected role.
+    /// Calculate the inversed path from source to destination. (= the path from destination tp source)
+    /// Then call method `MoveToByStep` to move selected role.
     /// </summary>
-    private bool calculatePathTo(Vector2 source, Vector2 destination, int maxStep, out Stack<Vector2> inversedPath)
+    private bool CalculatePathTo(Vector2 source, Vector2 destination, int maxStep, out Stack<Vector2> inversedPath)
     {
         inversedPath = new Stack<Vector2>();
         Vector2 curPos = destination;
@@ -226,16 +223,17 @@ public class GameMapManager : MonoSingleton<GameMapManager>
     /// <summary>
     /// Move by step
     /// </summary>
-    private IEnumerator moveToByStep(Stack<Vector2> inversedPath)
+    private IEnumerator MoveToByStep(Stack<Vector2> inversedPath)
     {
+        bool stepFinished = false;
         while(inversedPath.Count > 0)
         {
             Vector2 nextPos = inversedPath.Pop();
             _dictVec2Tiles.TryGetValue(nextPos, out Tile_1 nextTile);
-            bool stepFinished = false;
             _selectedRole.Move(nextTile.transform, () => { stepFinished = true; });
             yield return new WaitUntil(()=>stepFinished);
+            stepFinished = false;
         }
-        onMoveToEnd();
+        OnMoveToEnd();
     }
 }

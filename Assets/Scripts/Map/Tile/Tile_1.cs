@@ -2,10 +2,13 @@ using UnityEngine;
 
 /// <summary>
 /// Tile No. 1
-/// Support checking whether movable or not (if a obstacle exists in a range => not movable)
+/// Support checking whether movable or not (if a obstacle exists in a range => not movable).
 /// </summary>
 public class Tile_1 : Rectangle2DTile
 {
+    /// <summary>
+    /// This tile can be move to or not.
+    /// </summary>
     public bool Movable { get; private set; }
     public int Cost { get; private set; } // temp cost for role to reach here
 
@@ -20,7 +23,7 @@ public class Tile_1 : Rectangle2DTile
         MapPosition.y = (int)transform.position.y;
         Cost = int.MaxValue;
         _spRenderer = GetComponent<SpriteRenderer>();
-        checkMovable();
+        CheckMovable();
     }
 
     #region MonoBehaviour
@@ -61,7 +64,7 @@ public class Tile_1 : Rectangle2DTile
         Cost = int.MaxValue;
     }
 
-    private void checkMovable()
+    private void CheckMovable()
     {
         Collider2D collider = Physics2D.OverlapCircle(transform.position, _spRenderer.bounds.extents.x, _obstacleLayer);
         Movable = collider == null ? true : false;
